@@ -24,6 +24,34 @@
             <scope>compile</scope>
         </dependency>
 
+        <!-- https://mvnrepository.com/artifact/junit/junit -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/com.github.davidmoten/rtree -->
+        <dependency>
+            <groupId>com.github.davidmoten</groupId>
+            <artifactId>rtree</artifactId>
+            <version>0.8.7</version>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/io.reactivex.rxjava2/rxjava -->
+        <dependency>
+            <groupId>io.reactivex</groupId>
+            <artifactId>rxjava-string</artifactId>
+            <version>1.1.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.davidmoten</groupId>
+            <artifactId>grumpy-core</artifactId>
+            <version>0.4.8</version>
+        </dependency>
+
     </dependencies>
 
 </project>

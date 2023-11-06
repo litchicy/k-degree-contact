@@ -1,5 +1,7 @@
 package entity;
 
+import lombok.Data;
+
 import java.util.List;
 
 /**
@@ -8,11 +10,12 @@ import java.util.List;
  * @author cy
  * @date 2023/11/04
  */
+@Data
 public class Trajectory {
 
     /**
      * 移动对象的轨迹
      */
-    List<PositionPoint> tra;
+    private List<PositionPoint> tra;
 
 }
