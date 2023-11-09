@@ -82,7 +82,7 @@ public class RDCQ {
         this.rTrees = rTrees;
         this.allTraOfObjects = allTraOfObjects;
         this.initialInfectiousObjectsId = initialInfectiousObjectsId;
-        this.identifiedContactObjectsId = new HashSet<>();
+        this.identifiedContactObjectsId = new TreeSet<>();
         this.dynamicCandidateSet = new LinkedHashSet<>();
     }
 
@@ -101,7 +101,8 @@ public class RDCQ {
             commonQuery(windowStart, identifiedContactObjectsId, results);
             // 2.再开始查询初始传染源是否传染其他人
             commonQuery(windowStart, initialInfectiousObjectsId, results);
-            System.out.println("滑动窗口" + windowStart + "检测完毕！");
+//            System.err.println("window " + windowStart +"之后 list = " + identifiedContactObjectsId);
+//            System.out.println("RDCQ优化：滑动窗口" + windowStart + "检测完毕！");
         }
         return results;
     }
@@ -114,10 +115,10 @@ public class RDCQ {
      * @param results 结果
      */
     private void commonQuery(int windowStart, Set<Integer> sourceObjectIdSet,  List<QueryResult> results) {
-        Set<Integer> tempSet = new HashSet<>();
+        TreeSet<Integer> tempSet = new TreeSet<>(); // 记录当前窗口已被传染的移动对象id集合
         for(Integer sourceId : sourceObjectIdSet) {
             // 记录当前滑动窗口内每个时间点与传染源距离都小于d的 移动对象Id。
-            List<HashSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
+            List<TreeSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
             int indexOfArray = 0;
             // 遍历当前窗口内，width个时间点
             for(int timeOfSample = windowStart; timeOfSample < windowStart + widthOfSlidingWindow; timeOfSample++) {
@@ -136,14 +137,14 @@ public class RDCQ {
                 searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
                 indexOfArray++;
             }
-            // 对possiblyInfectedSetArray数组取交集。
-            HashSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
-            //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
-            tempSet.addAll(contactedObjectIdSetInWindow);
+            // 对possiblyInfectedSetArray数组取交集。 单个传染源密接的对象id。
+            TreeSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
             // 得到了发生密接事件的objectId集合：contactedObjectIdSet
             int contactTime = windowStart + widthOfSlidingWindow - 1;
-            List<QueryResult> fusionResult = fusionProcessingDynamicCandidateSet(sourceId, contactedObjectIdSetInWindow, contactTime);
+            List<QueryResult> fusionResult = fusionProcessingDynamicCandidateSet(sourceId, contactedObjectIdSetInWindow, tempSet, contactTime);
             results.addAll(fusionResult);
+            //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
+            tempSet.addAll(contactedObjectIdSetInWindow);
         }
         //将该窗口内密接事件的id加入到已确定密接对象id集合中
         identifiedContactObjectsId.addAll(tempSet);
@@ -157,12 +158,16 @@ public class RDCQ {
      * @param contactTime 密接时间
      * @return {@link List}<{@link QueryResult}>
      */
-    private List<QueryResult> fusionProcessingDynamicCandidateSet(Integer sourceId, HashSet<Integer> contactedObjectIdSet, int contactTime) {
+    private List<QueryResult> fusionProcessingDynamicCandidateSet(Integer sourceId, TreeSet<Integer> contactedObjectIdSet, TreeSet<Integer> tempSet, int contactTime) {
         List<QueryResult> fusionResultWithDegree = new ArrayList<>();
         // 1.判断sourceId是否属于初始传染源。
         if(initialInfectiousObjectsId.contains(sourceId)) {
             // 遍历处理全部的感染者
             for(Integer objectId : contactedObjectIdSet) {
+                // 已经记录了该objectId的密接事件
+                if(tempSet.contains(objectId)) {
+                    continue;
+                }
                 // 查询1度密接情况需要特殊处理
                 if(degree == 1) {
                     // 构建密接事件
@@ -193,6 +198,10 @@ public class RDCQ {
         else {
             Set<List<Map<String, Integer>>> newCandidateToAdd = new LinkedHashSet<>();
             for(Integer objectId : contactedObjectIdSet) {
+                // 已经记录了该objectId的密接事件
+                if(tempSet.contains(objectId)) {
+                    continue;
+                }
                 for(List<Map<String, Integer>> cand : dynamicCandidateSet) {
                     int candSize = cand.size(); // 当前cand中路径的长度（即传染源和密接对象的个数）
                     // 1)先判断是否是最后一个节点为source,且当前路径长度为k个，加上当前新节点则满足为k度密接定义（即一个初始传染源，k个密接对象），则构建k度密接事件加入到结果集合中。
@@ -260,11 +269,11 @@ public class RDCQ {
      *
      * @return {@link List}<{@link HashSet}<{@link Integer}>>
      */
-    private List<HashSet<Integer>> initializepossiblyInfectedSetArray() {
-        List<HashSet<Integer>> result = new ArrayList<>(widthOfSlidingWindow);
+    private List<TreeSet<Integer>> initializepossiblyInfectedSetArray() {
+        List<TreeSet<Integer>> result = new ArrayList<>(widthOfSlidingWindow);
         // 初始化列表中的每个HashSet。
         for(int i = 0; i < widthOfSlidingWindow; i++) {
-            result.add(new HashSet<>());
+            result.add(new TreeSet<>());
         }
         return result;
     }
@@ -275,11 +284,11 @@ public class RDCQ {
      * @param possiblyInfectedSetArray 可能受感染集合阵列
      * @return {@link HashSet}<{@link Integer}>
      */
-    private HashSet<Integer> takeIntersectionOfObjectIdSet(List<HashSet<Integer>> possiblyInfectedSetArray) {
-        HashSet<Integer> result;
+    private TreeSet<Integer> takeIntersectionOfObjectIdSet(List<TreeSet<Integer>> possiblyInfectedSetArray) {
+        TreeSet<Integer> result;
         // 如果第一个就为空，则该不符合密接事件的定义，因为需要窗口内所有的时间点都距离小于d
         if(possiblyInfectedSetArray.get(0).isEmpty()) {
-            return new HashSet<>();
+            return new TreeSet<>();
         }
         else {
             // 方便后续数组没两个取交集
@@ -289,7 +298,7 @@ public class RDCQ {
             // 处理空的情况
             if(possiblyInfectedSetArray.get(i).isEmpty()){
                 // 如果某个为空，则该不符合密接事件的定义，因为需要窗口内所有的时间点都距离小于d
-                return new HashSet<>();
+                return new TreeSet<>();
             }
             else {
                 // 与下一个取交集
@@ -310,19 +319,12 @@ public class RDCQ {
      * @param possiblyInfectedSetArray 可能受感染集合阵列
      * @param indexOfArray 数组索引
      */
-    private void searchResltProcessing(List<Entry<Integer, Point>> searchResult, List<HashSet<Integer>> possiblyInfectedSetArray, int indexOfArray) {
-        HashSet<Integer> tempObjectIdSet = new HashSet<>();
+    private void searchResltProcessing(List<Entry<Integer, Point>> searchResult, List<TreeSet<Integer>> possiblyInfectedSetArray, int indexOfArray) {
+        TreeSet<Integer> tempObjectIdSet = new TreeSet<>();
         for(Entry<Integer, Point> entry : searchResult) {
             // 改点所属的移动对象Id
             Integer objectId = entry.value();
-            // System.out.println("objectId = " + objectId);
-            Geometry geometry = entry.geometry();
-            // System.out.println("geometry = " + geometry.toString());
             tempObjectIdSet.add(objectId);
-//            if(geometry.distance(queryPoint) < thresholdOfDistance) {
-//                // 将可能发生密接事件的id加入到集合中
-//                tempObjectIdSet.add(objectId);
-//            }
         }
         possiblyInfectedSetArray.set(indexOfArray, tempObjectIdSet);
     }
@@ -359,7 +361,7 @@ public class RDCQ {
             PositionPoint objectPositon = new PositionPoint(0, latOfObject, lonOfObject);
             // 过滤矩形中不合理的点
             if(HaversineDistance.calculateHaversineDistance(sourcePostion, objectPositon) - thresholdOfDistance > 0) {
-                System.err.println("error entry.value() = " + entry.value());
+//                System.err.println("error entry.value() = " + entry.value());
                 errorPointList.add(entry);
             }
         }

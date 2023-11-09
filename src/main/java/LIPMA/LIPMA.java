@@ -3,14 +3,14 @@ package LIPMA;
 import com.github.davidmoten.grumpy.core.Position;
 import com.github.davidmoten.rtree.Entry;
 import com.github.davidmoten.rtree.RTree;
+import com.github.davidmoten.rtree.geometry.Circle;
 import com.github.davidmoten.rtree.geometry.Geometries;
-import com.github.davidmoten.rtree.geometry.Geometry;
 import com.github.davidmoten.rtree.geometry.Point;
 import com.github.davidmoten.rtree.geometry.Rectangle;
 import entity.ContactEvent;
-import entity.MovingObject;
 import entity.PositionPoint;
 import entity.QueryResult;
+import rx.functions.Func1;
 import utils.HaversineDistance;
 
 import java.util.*;
@@ -69,8 +69,7 @@ public class LIPMA {
         this.rTrees = rTrees;
         this.allTraOfObjects = allTraOfObjects;
         this.initialInfectiousObjectsId = initialInfectiousObjectsId;
-        this.identifiedContactObjectsId = new HashSet<>();
-
+        this.identifiedContactObjectsId = new TreeSet<>();
     }
 
     /**
@@ -123,16 +122,16 @@ public class LIPMA {
             commonQuery(windowStart, identifiedContactObjectsId, results);
             // 2.再开始查询初始传染源是否传染其他人
             commonQuery(windowStart, initialInfectiousObjectsId, results);
-            System.out.println("cy拼接 windows" + windowStart + "检测完毕！");
+//            System.out.println("LIPMA优化拼接：滑动窗口" + windowStart + "检测完毕！");
         }
         return results;
     }
 
     private void commonQuery(int windowStart, Set<Integer> sourceObjectIdSet, List<ContactEvent> results) {
-        Set<Integer> tempSet = new HashSet<>();
+        TreeSet<Integer> tempSet = new TreeSet<>(); // 记录当前窗口已被传染的移动对象id
         for(Integer sourceId : sourceObjectIdSet) {
             // 记录当前滑动窗口内每个时间点与传染源距离都小于d的 移动对象Id。
-            List<HashSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
+            List<TreeSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
             int indexOfArray = 0;
             // 遍历当前窗口内，width个时间点
             for(int timeOfSample = windowStart; timeOfSample < windowStart + widthOfSlidingWindow; timeOfSample++) {
@@ -140,25 +139,31 @@ public class LIPMA {
                 double lonOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLongitude();
                 // 传染源在该时间点的纬度
                 double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
-                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
-//                Point queryPoint = Geometries.point(lonOfSource, latOfSource);
-//                Circle queryRectangle = Geometries.circle(lonOfSource, latOfSource, thresholdOfDistance);
-                // 对r树进行范围搜索 queryPoint和distance单位一致。
-                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+                // 使用矩形查询
+//                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
+//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+                // 给定点查询，对r树进行范围搜索 queryPoint和distance单位一致。
+                Point queryPoint = Geometries.point(lonOfSource, latOfSource);
+                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryPoint, thresholdOfDistance).toList().toBlocking().single();
+                // 使用圆查询
+//                Circle queryCircle = Geometries.circle(lonOfSource, latOfSource, thresholdOfDistance);
+//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryCircle).toList().toBlocking().single();
+//                System.err.println("过滤之前：searchResult.size() = " + searchResult.size());
                 // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
                 filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
+//                System.err.println("过滤之后：searchResult.size() = " + searchResult.size());
 //                List<Entry<Integer, Rectangle>> searchResult = rTrees[timeOfSample].search(queryRectangle, thresholdOfDistance).toList().toBlocking().single();
                 searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
                 indexOfArray++;
             }
             // 对possiblyInfectedSetArray数组取交集。
-            HashSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
-            //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
-            tempSet.addAll(contactedObjectIdSetInWindow);
+            TreeSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
             // 得到了发生密接事件的objectId集合：contactedObjectIdSet
             int contactTime = windowStart + widthOfSlidingWindow - 1;
-            List<ContactEvent> fusionResult = constructContactEvent(sourceId, contactedObjectIdSetInWindow, contactTime);
+            List<ContactEvent> fusionResult = constructContactEvent(sourceId, contactedObjectIdSetInWindow, tempSet, contactTime);
             results.addAll(fusionResult);
+            //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
+            tempSet.addAll(contactedObjectIdSetInWindow);
         }
         //将该窗口内密接事件的id加入到已确定密接对象id集合中
         identifiedContactObjectsId.addAll(tempSet);
@@ -173,10 +178,14 @@ public class LIPMA {
      * @param contactTime 接触时间
      * @return {@link List}<{@link QueryResult}>
      */
-    private List<ContactEvent> constructContactEvent(Integer sourceId, HashSet<Integer> contactedObjectIdSetInWindow, int contactTime) {
+    private List<ContactEvent> constructContactEvent(Integer sourceId, TreeSet<Integer> contactedObjectIdSetInWindow, TreeSet<Integer> tempSet, int contactTime) {
         List<ContactEvent> results = new ArrayList<>();
-        for(Integer objecetId : contactedObjectIdSetInWindow) {
-            results.add(new ContactEvent(sourceId, objecetId, contactTime));
+        for(Integer objectId : contactedObjectIdSetInWindow) {
+            // 已经记录了该objectId的密接事件
+            if(tempSet.contains(objectId)) {
+                continue;
+            }
+            results.add(new ContactEvent(sourceId, objectId, contactTime));
         }
         return results;
     }
@@ -187,11 +196,11 @@ public class LIPMA {
      *
      * @return {@link List}<{@link HashSet}<{@link Integer}>>
      */
-    private List<HashSet<Integer>> initializepossiblyInfectedSetArray() {
-        List<HashSet<Integer>> result = new ArrayList<>(widthOfSlidingWindow);
+    private List<TreeSet<Integer>> initializepossiblyInfectedSetArray() {
+        List<TreeSet<Integer>> result = new ArrayList<>(widthOfSlidingWindow);
         // 初始化列表中的每个HashSet。
         for(int i = 0; i < widthOfSlidingWindow; i++) {
-            result.add(new HashSet<>());
+            result.add(new TreeSet<>());
         }
         return result;
     }
@@ -242,8 +251,8 @@ public class LIPMA {
      * @param possiblyInfectedSetArray 可能受感染集合阵列
      * @param indexOfArray 数组索引
      */
-    private void searchResltProcessing(List<Entry<Integer, Point>> searchResult, List<HashSet<Integer>> possiblyInfectedSetArray, int indexOfArray) {
-        HashSet<Integer> tempObjectIdSet = new HashSet<>();
+    private void searchResltProcessing(List<Entry<Integer, Point>> searchResult, List<TreeSet<Integer>> possiblyInfectedSetArray, int indexOfArray) {
+        TreeSet<Integer> tempObjectIdSet = new TreeSet<>();
         for(Entry<Integer, Point> entry : searchResult) {
             // 改点所属的移动对象Id
             Integer objectId = entry.value();
@@ -258,11 +267,11 @@ public class LIPMA {
      * @param possiblyInfectedSetArray 可能受感染集合阵列
      * @return {@link HashSet}<{@link Integer}>
      */
-    private HashSet<Integer> takeIntersectionOfObjectIdSet(List<HashSet<Integer>> possiblyInfectedSetArray) {
-        HashSet<Integer> result;
+    private TreeSet<Integer> takeIntersectionOfObjectIdSet(List<TreeSet<Integer>> possiblyInfectedSetArray) {
+        TreeSet<Integer> result;
         // 如果第一个就为空，则该不符合密接事件的定义，因为需要窗口内所有的时间点都距离小于d
         if(possiblyInfectedSetArray.get(0).isEmpty()) {
-            return new HashSet<>();
+            return new TreeSet<>();
         }
         else {
             // 方便后续数组没两个取交集
@@ -272,7 +281,7 @@ public class LIPMA {
             // 处理空的情况
             if(possiblyInfectedSetArray.get(i).isEmpty()){
                 // 如果某个为空，则该不符合密接事件的定义，因为需要窗口内所有的时间点都距离小于d
-                return new HashSet<>();
+                return new TreeSet<>();
             }
             else {
                 // 与下一个取交集

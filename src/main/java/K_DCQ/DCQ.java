@@ -74,7 +74,7 @@ public class DCQ {
         this.totalTimePoints = totalTimePoints;
         this.objectsToBeAnalyzed = objectsToBeAnalyzed;
         this.initialInfectiousObjects = initialInfectiousObjects;
-        this.identifiedContactObjects = new LinkedHashSet<>();
+        this.identifiedContactObjects = new TreeSet<>();
         this.dynamicCandidateSet = new LinkedHashSet<>();
     }
 
@@ -88,12 +88,11 @@ public class DCQ {
         List<QueryResult> result = new ArrayList<>();
         // 依次处理滑动窗口
         for(int windowStart = 0; windowStart < totalTimePoints - widthOfSlidingWindow; windowStart++) {
-//        for(int windowStart = 0; windowStart < 1; windowStart++) {
             // 不存在待分析对象，结束时间窗口的循环
             if(objectsToBeAnalyzed.isEmpty()) {
                 break;
             }
-            Set<MovingObject> contactedMovingObjectsInCurrentWindow = new LinkedHashSet<>();
+            Set<MovingObject> contactedMovingObjectsInCurrentWindow = new TreeSet<>();
             // 每个窗口内查询全部的待分析移动对象
             for(MovingObject analyzedObject : objectsToBeAnalyzed) {
                 // 1.先与已经确定的密接对象进行判断
@@ -107,7 +106,7 @@ public class DCQ {
             }
             // 将每个窗口内的密接对象一次性添加到已确定的密接对象集合中。
             identifiedContactObjects.addAll(contactedMovingObjectsInCurrentWindow);
-            System.out.println("window " + windowStart + "检查完毕！");
+//            System.out.println("DCQ基本：滑动窗口" + windowStart + "检查完毕！");
         }
         return result;
     }
