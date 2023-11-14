@@ -62,6 +62,9 @@ public class DCQ {
      */
     private Set<List<Map<String, Integer>>> dynamicCandidateSet;
 
+    // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+    private Set<MovingObject>[] tempInfectedObjectIdInEachWindowArray;
+
     public DCQ() {
 
     }
@@ -76,6 +79,11 @@ public class DCQ {
         this.initialInfectiousObjects = initialInfectiousObjects;
         this.identifiedContactObjects = new TreeSet<>();
         this.dynamicCandidateSet = new LinkedHashSet<>();
+        this.tempInfectedObjectIdInEachWindowArray = new TreeSet[widthOfSlidingWindow];
+        // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+        for(int i = 0; i < widthOfSlidingWindow; i++) {
+            tempInfectedObjectIdInEachWindowArray[i] = new TreeSet<>();
+        }
     }
 
     /**
@@ -87,7 +95,9 @@ public class DCQ {
 
         List<QueryResult> result = new ArrayList<>();
         // 依次处理滑动窗口
-        for(int windowStart = 0; windowStart < totalTimePoints - widthOfSlidingWindow; windowStart++) {
+        for(int windowStart = 0; windowStart <= totalTimePoints - widthOfSlidingWindow; windowStart++) {
+            // 在第i个窗口，需要把在第i-width窗口发生密接事件的移动对象作为传染源加入进来。
+            identifiedContactObjects.addAll(tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow]);
             // 不存在待分析对象，结束时间窗口的循环
             if(objectsToBeAnalyzed.isEmpty()) {
                 break;
@@ -96,16 +106,16 @@ public class DCQ {
             // 每个窗口内查询全部的待分析移动对象
             for(MovingObject analyzedObject : objectsToBeAnalyzed) {
                 // 1.先与已经确定的密接对象进行判断
-                boolean ifContact = commonQueryProcessing(identifiedContactObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
+                boolean ifContact = commonQuery(identifiedContactObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
                 // 发生密接事件，则不需要与确定的密接对象进行判断，直接分析下一个待分析对象。
                 if(ifContact) {
                     continue;
                 }
                 // 2.再与初始传染源进行判断
-                commonQueryProcessing(initialInfectiousObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
+                commonQuery(initialInfectiousObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
             }
-            // 将每个窗口内的密接对象一次性添加到已确定的密接对象集合中。
-            identifiedContactObjects.addAll(contactedMovingObjectsInCurrentWindow);
+            // 将每个时间窗口的被传染的密接对象记录下来。
+            tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow] = contactedMovingObjectsInCurrentWindow;
 //            System.out.println("DCQ基本：滑动窗口" + windowStart + "检查完毕！");
         }
         return result;
@@ -121,7 +131,7 @@ public class DCQ {
      * @param result 结果
      * @return boolean
      */
-    private boolean commonQueryProcessing(Set<MovingObject> sourceSet, Set<MovingObject> contactedMovingObjectsInCurrentWindow,
+    private boolean commonQuery(Set<MovingObject> sourceSet, Set<MovingObject> contactedMovingObjectsInCurrentWindow,
                                           MovingObject analyzedObject, int windowStart, List<QueryResult> result) {
         ContactEvent contactEvent = null;
         int contactTime = windowStart + widthOfSlidingWindow - 1; // 密接发生的时间
@@ -129,14 +139,11 @@ public class DCQ {
             // 判断是否发发生密接事件
             contactEvent = checkIfContact(source, analyzedObject, windowStart);
             if(contactEvent != null) { // 发生密接事件
-//                System.out.println("contactEvent = " + contactEvent);
                 moveToIdentifiedContactObjectsSet(analyzedObject, contactedMovingObjectsInCurrentWindow);
-//                System.out.println("contactEvent = " + contactEvent);
                 // 与动态候选序列进行融合处理
                 QueryResult oneResult = fusionProcessingDynamicCandidateSet(source, analyzedObject, contactTime);
                 if(oneResult != null) {
                     // 结果符合k度密接定义，加入到结果集合。
-//                    System.err.println("oneResult = " + oneResult);
                     result.add(oneResult);
                 }
                 // 一旦发生密接事件，则返回结果为true
@@ -177,7 +184,6 @@ public class DCQ {
                 break;
             }
         }
-//        System.out.println(source.getId() + "号传染源和" + object.getId() + "号移动对象，在窗口" + windowId + "内检查完毕。结果为：" + contactResult);
         if(flag) {
             return new ContactEvent(source.getId(), object.getId(), windowStart + widthOfSlidingWindow - 1);
         }
@@ -240,9 +246,6 @@ public class DCQ {
                 int candSize = cand.size(); // 当前cand中路径的长度（即传染源和密接对象的个数）
                 // 1)先判断是否是最后一个节点为source,且当前路径长度为k个，加上当前新节点则满足为k度密接定义（即一个初始传染源，k个密接对象），则构建k度密接事件加入到结果集合中。
                 if(cand.get(candSize - 1).get("id").equals(source.getId()) && candSize == degree) {
-//                    System.out.println("cand = " + cand);
-//                    System.out.println("cand.get(candSize - 1) = " + cand.get(candSize - 1));
-//                    System.err.println("source.getId() = " + source.getId());
                     List<ContactEvent> k_degree_contactPath = new ArrayList<>();
                     for(int i = 0; i < candSize; i++) {
                         int formerId = cand.get(i).get("id"); // 密接事件中传染源id
@@ -292,46 +295,8 @@ public class DCQ {
                     }
                 }
             }
-//            dynamicCandidateSet.addAll(newCandidateToAdd);
         }
         return null;
-    }
-
-
-
-    /**
-     * 查询算法，每个待分析对象先与初始传染源进行密接判断
-     *
-     * @return {@link List}<{@link QueryResult}>
-     */
-    public List<QueryResult> startQuery_compareWithInitiallyInfectedObjectFirst() {
-        List<QueryResult> result = new ArrayList<>();
-        // 依次处理滑动窗口
-        for(int windowStart = 0; windowStart < totalTimePoints - widthOfSlidingWindow; windowStart++) {
-            // 不存在待分析对象，则直接返回结果
-            if(objectsToBeAnalyzed.isEmpty()) {
-                break;
-            }
-            Set<MovingObject> contactedMovingObjectsInCurrentWindow = new LinkedHashSet<>();
-            // 每个窗口内查询全部的待分析移动对象
-            for(MovingObject analyzedObject : objectsToBeAnalyzed) {
-                // 判断其不为空
-                if(analyzedObject == null) {
-                    continue;
-                }
-                // 1.先与初始传染源进行判断
-                boolean ifContact = commonQueryProcessing(initialInfectiousObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
-                // 发生密接事件，则不需要与确定的密接对象进行判断，直接分析下一个待分析对象。
-                if(ifContact) {
-                    continue;
-                }
-                // 2.再与已经确定的密接对象进行判断
-                commonQueryProcessing(identifiedContactObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
-            }
-            // 将每个窗口内的密接对象一次性添加到已确定的密接对象集合中。
-            identifiedContactObjects.addAll(contactedMovingObjectsInCurrentWindow);
-        }
-        return result;
     }
 
 }

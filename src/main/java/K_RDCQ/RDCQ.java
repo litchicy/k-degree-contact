@@ -8,6 +8,7 @@ import entity.ContactEvent;
 import entity.MovingObject;
 import entity.PositionPoint;
 import entity.QueryResult;
+import sun.reflect.generics.tree.Tree;
 import utils.HaversineDistance;
 
 import java.beans.Introspector;
@@ -64,6 +65,9 @@ public class RDCQ {
      */
     private Set<List<Map<String, Integer>>> dynamicCandidateSet;
 
+    // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+    private TreeSet<Integer>[] tempInfectedObjectIdInEachWindowArray;
+
     /**
      * 全部移动对象的所有时间采样点的r树
      */
@@ -84,6 +88,11 @@ public class RDCQ {
         this.initialInfectiousObjectsId = initialInfectiousObjectsId;
         this.identifiedContactObjectsId = new TreeSet<>();
         this.dynamicCandidateSet = new LinkedHashSet<>();
+        this.tempInfectedObjectIdInEachWindowArray = new TreeSet[widthOfSlidingWindow];
+        // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+        for(int i = 0; i < widthOfSlidingWindow; i++) {
+            tempInfectedObjectIdInEachWindowArray[i] = new TreeSet<>();
+        }
     }
 
 
@@ -94,51 +103,84 @@ public class RDCQ {
      */
     public List<QueryResult> startQuery_contactedObjectFirst() {
         List<QueryResult> results = new ArrayList<>();
-
-        for(int windowStart = 0; windowStart < totalTimePoints - widthOfSlidingWindow; windowStart++) {
+        for(int windowStart = 0; windowStart <= totalTimePoints - widthOfSlidingWindow; windowStart++) {
 //        for(int windowStart = 0; windowStart < 1; windowStart++) {
+            //将时间窗口i内发生的对象源，在i+width开始的时间窗口作为传染源使用
+            identifiedContactObjectsId.addAll(tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow]);
             // 1.先开始查询密接对象是否传染其他人
-            commonQuery(windowStart, identifiedContactObjectsId, results);
-            // 2.再开始查询初始传染源是否传染其他人
-            commonQuery(windowStart, initialInfectiousObjectsId, results);
-//            System.err.println("window " + windowStart +"之后 list = " + identifiedContactObjectsId);
+            TreeSet<Integer> tempInfectedObjectIdSet1 = commonQuery(windowStart, identifiedContactObjectsId, results);
+            // 2.再开始查询初始传染源是否传染其他人, 但是需要排除在第一步中被传染的移动对象id：tempInfectedObjectIdSet1。
+            TreeSet<Integer> tempInfectedObjectIdSet2 = commonQuery(windowStart, initialInfectiousObjectsId, results, tempInfectedObjectIdSet1);
+            // 当前时间窗口内被传染的对象id
+            tempInfectedObjectIdSet1.addAll(tempInfectedObjectIdSet2);
+            // 记录在当前i时间窗口内被传染的对象id，在i+width开始的时间窗口被密接对象集合identifiedContactObjectsId添加进去。
+            int index = windowStart % widthOfSlidingWindow;
+            tempInfectedObjectIdInEachWindowArray[index] = tempInfectedObjectIdSet1;
 //            System.out.println("RDCQ优化：滑动窗口" + windowStart + "检测完毕！");
         }
         return results;
     }
 
     /**
-     * 通用查询方法
+     * 通用查询被密接对象传染的移动对象的方法
      *
      * @param windowStart 窗口开始
      * @param sourceObjectIdSet 传染源对象id集合
      * @param results 结果
      */
-    private void commonQuery(int windowStart, Set<Integer> sourceObjectIdSet,  List<QueryResult> results) {
+    private TreeSet<Integer> commonQuery(int windowStart, Set<Integer> sourceObjectIdSet,  List<QueryResult> results) {
         TreeSet<Integer> tempSet = new TreeSet<>(); // 记录当前窗口已被传染的移动对象id集合
         for(Integer sourceId : sourceObjectIdSet) {
             // 记录当前滑动窗口内每个时间点与传染源距离都小于d的 移动对象Id。
             List<TreeSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
             int indexOfArray = 0;
             // 遍历当前窗口内，width个时间点
-            for(int timeOfSample = windowStart; timeOfSample < windowStart + widthOfSlidingWindow; timeOfSample++) {
+//            for(int timeOfSample = windowStart; timeOfSample < windowStart + widthOfSlidingWindow; timeOfSample++) {
+//                // 传染源在该时间点的经度
+//                double lonOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLongitude();
+//                // 传染源在该时间点的纬度
+//                double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
+//                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
+//                // 对r树进行范围搜索 queryPoint和distance单位一致。
+//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+//                // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
+//                filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
+//                searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
+//                indexOfArray++;
+//            }
+            // 第一层过滤点策略
+            for(int count = 0; count < 3; count++) {
+                //开始点，中间点和末尾时间点
+                int timeOfSample;
+                if(count == 0) {
+                    timeOfSample = windowStart;
+                }
+                else if(count == 1) {
+                    timeOfSample = windowStart + ((widthOfSlidingWindow - 1) / 2);
+                }
+                else {
+                    timeOfSample = windowStart + widthOfSlidingWindow - 1;
+                }
                 // 传染源在该时间点的经度
                 double lonOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLongitude();
                 // 传染源在该时间点的纬度
                 double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
                 Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
-//                Point queryPoint = Geometries.point(lonOfSource, latOfSource);
-//                Circle queryRectangle = Geometries.circle(lonOfSource, latOfSource, thresholdOfDistance);
                 // 对r树进行范围搜索 queryPoint和distance单位一致。
                 List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
                 // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
                 filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
-//                List<Entry<Integer, Rectangle>> searchResult = rTrees[timeOfSample].search(queryRectangle, thresholdOfDistance).toList().toBlocking().single();
                 searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
                 indexOfArray++;
             }
             // 对possiblyInfectedSetArray数组取交集。 单个传染源密接的对象id。
             TreeSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
+            // 距离确认
+            caculateDistanceBetweenMayContactObjectsAndSource(contactedObjectIdSetInWindow, sourceId, windowStart);
+            // 当前窗口内的密接对象不能包含前widthOfSlidingWindow个窗口的已经确定的密接对象,因为还没添加到密接对象集合中。
+            for(int i = 0; i < widthOfSlidingWindow; i++) {
+                contactedObjectIdSetInWindow.removeAll(tempInfectedObjectIdInEachWindowArray[i]);
+            }
             // 得到了发生密接事件的objectId集合：contactedObjectIdSet
             int contactTime = windowStart + widthOfSlidingWindow - 1;
             List<QueryResult> fusionResult = fusionProcessingDynamicCandidateSet(sourceId, contactedObjectIdSetInWindow, tempSet, contactTime);
@@ -146,8 +188,110 @@ public class RDCQ {
             //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
             tempSet.addAll(contactedObjectIdSetInWindow);
         }
-        //将该窗口内密接事件的id加入到已确定密接对象id集合中
-        identifiedContactObjectsId.addAll(tempSet);
+        return tempSet;
+    }
+
+    /**
+     * 通用查询被初始传染源传染的移动对象的方法
+     *
+     * @param windowStart 窗口开始
+     * @param sourceObjectIdSet 源对象id集
+     * @param results 结果
+     * @param tempInfectedObjectIdSet1 临时感染对象id set1
+     * @return {@link TreeSet}<{@link Integer}>
+     */
+    private TreeSet<Integer> commonQuery(int windowStart, Set<Integer> sourceObjectIdSet,  List<QueryResult> results, TreeSet<Integer> tempInfectedObjectIdSet1) {
+        TreeSet<Integer> tempSet = new TreeSet<>(); // 记录当前窗口已被传染的移动对象id集合
+        for(Integer sourceId : sourceObjectIdSet) {
+            // 记录当前滑动窗口内每个时间点与传染源距离都小于d的 移动对象Id。
+            List<TreeSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
+            int indexOfArray = 0;
+            // 遍历当前窗口内，width个时间点
+//            for(int timeOfSample = windowStart; timeOfSample < windowStart + widthOfSlidingWindow; timeOfSample++) {
+//                // 传染源在该时间点的经度
+//                double lonOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLongitude();
+//                // 传染源在该时间点的纬度
+//                double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
+//                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
+//                // 对r树进行范围搜索 queryPoint和distance单位一致。
+//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+//                // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
+//                filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
+//                searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
+//                indexOfArray++;
+//            }
+            // 第一层过滤点策略
+            for(int count = 0; count < 3; count++) {
+                //开始点，中间点和末尾时间点
+                int timeOfSample;
+                if(count == 0) {
+                    timeOfSample = windowStart;
+                }
+                else if(count == 1) {
+                    timeOfSample = windowStart + ((widthOfSlidingWindow - 1) / 2);
+                }
+                else {
+                    timeOfSample = windowStart + widthOfSlidingWindow - 1;
+                }
+                // 传染源在该时间点的经度
+                double lonOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLongitude();
+                // 传染源在该时间点的纬度
+                double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
+                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
+                // 对r树进行范围搜索 queryPoint和distance单位一致。
+                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+                // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
+                filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
+                searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
+                indexOfArray++;
+            }
+            // 对possiblyInfectedSetArray数组取交集。 单个传染源密接的对象id。
+            TreeSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
+            // 距离确认
+            caculateDistanceBetweenMayContactObjectsAndSource(contactedObjectIdSetInWindow, sourceId, windowStart);
+            // 当前窗口内的密接对象不能包含前widthOfSlidingWindow个窗口的已经确定的密接对象,因为还没添加到密接对象集合中。
+            for(int i = 0; i < widthOfSlidingWindow; i++) {
+                contactedObjectIdSetInWindow.removeAll(tempInfectedObjectIdInEachWindowArray[i]);
+            }
+            // 在同一个窗口内初始传染源的移动对象中除去被密接对象传染源的移动对象。
+            contactedObjectIdSetInWindow.removeAll(tempInfectedObjectIdSet1);
+            // 得到了发生密接事件的objectId集合：contactedObjectIdSet
+            int contactTime = windowStart + widthOfSlidingWindow - 1;
+            List<QueryResult> fusionResult = fusionProcessingDynamicCandidateSet(sourceId, contactedObjectIdSetInWindow, tempSet, contactTime);
+            results.addAll(fusionResult);
+            //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
+            tempSet.addAll(contactedObjectIdSetInWindow);
+        }
+        return tempSet;
+    }
+
+    /**
+     * 计算可能密接对象与源之间距离
+     *
+     * @param contactedObjectIdSetInWindow 在窗口中设置被接触对象id
+     * @param sourceId 源id
+     * @param windowStart windowstart
+     * @return {@link TreeSet}<{@link Integer}>
+     */
+    private void caculateDistanceBetweenMayContactObjectsAndSource(TreeSet<Integer> contactedObjectIdSetInWindow, Integer sourceId, int windowStart) {
+        for(int i = windowStart + 1; i < windowStart + widthOfSlidingWindow - 1; i++) {
+            // 获取传染源的此时刻的位置
+            PositionPoint sourcePosition = allTraOfObjects.get(sourceId - 1).get(i);
+            if(i == windowStart + ((widthOfSlidingWindow - 1) / 2)) { // 跳过中间抽样点的检查
+                continue;
+            }
+            // 检查每个可能密接对象在窗口内每个时刻都满足要求
+            Iterator<Integer> iterator = contactedObjectIdSetInWindow.iterator();
+            while(iterator.hasNext()) {
+                Integer objectId = iterator.next();
+                PositionPoint objectPosition = allTraOfObjects.get(objectId - 1).get(i);
+                if(HaversineDistance.calculateHaversineDistance(sourcePosition, objectPosition) - thresholdOfDistance > 0) {
+                    iterator.remove();
+                }
+            }
+//            contactedObjectIdSetInWindow = result;
+        }
+//        return contactedObjectIdSetInWindow;
     }
 
     /**
@@ -206,9 +350,6 @@ public class RDCQ {
                     int candSize = cand.size(); // 当前cand中路径的长度（即传染源和密接对象的个数）
                     // 1)先判断是否是最后一个节点为source,且当前路径长度为k个，加上当前新节点则满足为k度密接定义（即一个初始传染源，k个密接对象），则构建k度密接事件加入到结果集合中。
                     if(cand.get(candSize - 1).get("id").equals(sourceId) && candSize == degree) {
-//                    System.out.println("cand = " + cand);
-//                    System.out.println("cand.get(candSize - 1) = " + cand.get(candSize - 1));
-//                    System.err.println("source.getId() = " + source.getId());
                         List<ContactEvent> k_degree_contactPath = new ArrayList<>();
                         for(int i = 0; i < candSize; i++) {
                             int formerId = cand.get(i).get("id"); // 密接事件中传染源id
@@ -223,7 +364,6 @@ public class RDCQ {
                                 time = contactTime;
                             }
                             ContactEvent contactEvent = new ContactEvent(formerId, latterId, time);
-//                        System.err.println("contactEvent = " + contactEvent);
                             k_degree_contactPath.add(contactEvent);
                         }
                         // 返回符合k度密接事件定义的结果。
@@ -270,9 +410,9 @@ public class RDCQ {
      * @return {@link List}<{@link HashSet}<{@link Integer}>>
      */
     private List<TreeSet<Integer>> initializepossiblyInfectedSetArray() {
-        List<TreeSet<Integer>> result = new ArrayList<>(widthOfSlidingWindow);
+        List<TreeSet<Integer>> result = new ArrayList<>();
         // 初始化列表中的每个HashSet。
-        for(int i = 0; i < widthOfSlidingWindow; i++) {
+        for(int i = 0; i < 3; i++) {
             result.add(new TreeSet<>());
         }
         return result;
@@ -294,7 +434,7 @@ public class RDCQ {
             // 方便后续数组没两个取交集
             result = possiblyInfectedSetArray.get(0);
         }
-        for(int i = 1; i < widthOfSlidingWindow; i++) {
+        for(int i = 1; i < 3; i++) {
             // 处理空的情况
             if(possiblyInfectedSetArray.get(i).isEmpty()){
                 // 如果某个为空，则该不符合密接事件的定义，因为需要窗口内所有的时间点都距离小于d
@@ -361,7 +501,6 @@ public class RDCQ {
             PositionPoint objectPositon = new PositionPoint(0, latOfObject, lonOfObject);
             // 过滤矩形中不合理的点
             if(HaversineDistance.calculateHaversineDistance(sourcePostion, objectPositon) - thresholdOfDistance > 0) {
-//                System.err.println("error entry.value() = " + entry.value());
                 errorPointList.add(entry);
             }
         }

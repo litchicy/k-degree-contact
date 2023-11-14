@@ -58,6 +58,9 @@ public class BASE_LIPMA {
      */
     private Set<MovingObject> identifiedContactObjects;
 
+    // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+    private Set<MovingObject>[] tempInfectedObjectIdInEachWindowArray;
+
     public BASE_LIPMA() {
 
     }
@@ -71,6 +74,11 @@ public class BASE_LIPMA {
         this.initialInfectiousObjects = initialInfectiousObjects;
         this.initialInfectiousSourcesId = initialInfectiousSourcesId;
         this.identifiedContactObjects = new TreeSet<>();
+        this.tempInfectedObjectIdInEachWindowArray = new TreeSet[widthOfSlidingWindow];
+        // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+        for(int i = 0; i < widthOfSlidingWindow; i++) {
+            tempInfectedObjectIdInEachWindowArray[i] = new TreeSet<>();
+        }
     }
 
     /**
@@ -80,7 +88,9 @@ public class BASE_LIPMA {
      */
     public List<ContactEvent> startQuery() {
         List<ContactEvent> result = new ArrayList<>();
-        for(int windowStart = 0; windowStart < totalTimePoints - widthOfSlidingWindow; windowStart++) {
+        for(int windowStart = 0; windowStart <= totalTimePoints - widthOfSlidingWindow; windowStart++) {
+            // 在第i个窗口，需要把在第i-width窗口发生密接事件的移动对象作为传染源加入进来。
+            identifiedContactObjects.addAll(tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow]);
             if(objectsToBeAnalyzed.isEmpty()) {
                 break;
             }
@@ -96,8 +106,8 @@ public class BASE_LIPMA {
                 // 2.再与初始传染源进行判断
                 commonQuery(initialInfectiousObjects, contactedMovingObjectsInCurrentWindow, analyzedObject, windowStart, result);
             }
-            // 将每个窗口内的密接对象一次性添加到已确定的密接对象集合中。
-            identifiedContactObjects.addAll(contactedMovingObjectsInCurrentWindow);
+            // 将每个时间窗口的被传染的密接对象记录下来。
+            tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow] = contactedMovingObjectsInCurrentWindow;
 //            System.out.println("LIPMA_BASE基本：滑动窗口" + windowStart + "检查完毕！");
         }
         return result;

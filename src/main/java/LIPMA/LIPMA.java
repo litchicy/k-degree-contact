@@ -58,6 +58,9 @@ public class LIPMA {
      */
     private RTree<Integer, Point>[] rTrees;
 
+    // 存储w个时间窗口的密接对象id集合，第一个时间窗口的确定的密接对象需要在
+    private TreeSet<Integer>[] tempInfectedObjectIdInEachWindowArray;
+
     public LIPMA() {
 
     }
@@ -70,6 +73,10 @@ public class LIPMA {
         this.allTraOfObjects = allTraOfObjects;
         this.initialInfectiousObjectsId = initialInfectiousObjectsId;
         this.identifiedContactObjectsId = new TreeSet<>();
+        this.tempInfectedObjectIdInEachWindowArray = new TreeSet[widthOfSlidingWindow];
+        for(int i= 0; i < widthOfSlidingWindow; i++) {
+            tempInfectedObjectIdInEachWindowArray[i] = new TreeSet<>();
+        }
     }
 
     /**
@@ -117,17 +124,24 @@ public class LIPMA {
      */
     public List<ContactEvent> startQuery() {
         List<ContactEvent> results = new ArrayList<>();
-        for(int windowStart = 0; windowStart < totalTimePoints - widthOfSlidingWindow; windowStart++) {
+        for(int windowStart = 0; windowStart <= totalTimePoints - widthOfSlidingWindow; windowStart++) {
+            // 将第i个窗口的发现的传染源，在i+1个窗口的开始添加到已确定密接对象集合中。
+            identifiedContactObjectsId.addAll(tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow]);
             // 1.先开始查询密接对象是否传染其他人
-            commonQuery(windowStart, identifiedContactObjectsId, results);
+            TreeSet<Integer> tempInfectedObjectIdSet1 = commonQuery(windowStart, identifiedContactObjectsId, results);
             // 2.再开始查询初始传染源是否传染其他人
-            commonQuery(windowStart, initialInfectiousObjectsId, results);
+            TreeSet<Integer> tempInfectedObjectIdSet2 = commonQuery(windowStart, initialInfectiousObjectsId, results, tempInfectedObjectIdSet1);
+            // 当前时间窗口内被传染的对象id
+            tempInfectedObjectIdSet1.addAll(tempInfectedObjectIdSet2);
+            // 记录在当前i时间窗口内被传染的对象id，在i+width开始的时间窗口被密接对象集合identifiedContactObjectsId添加进去。
+            int index = windowStart % widthOfSlidingWindow;
+            tempInfectedObjectIdInEachWindowArray[index] = tempInfectedObjectIdSet1;
 //            System.out.println("LIPMA优化拼接：滑动窗口" + windowStart + "检测完毕！");
         }
         return results;
     }
 
-    private void commonQuery(int windowStart, Set<Integer> sourceObjectIdSet, List<ContactEvent> results) {
+    private TreeSet<Integer> commonQuery(int windowStart, Set<Integer> sourceObjectIdSet, List<ContactEvent> results) {
         TreeSet<Integer> tempSet = new TreeSet<>(); // 记录当前窗口已被传染的移动对象id
         for(Integer sourceId : sourceObjectIdSet) {
             // 记录当前滑动窗口内每个时间点与传染源距离都小于d的 移动对象Id。
@@ -140,24 +154,22 @@ public class LIPMA {
                 // 传染源在该时间点的纬度
                 double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
                 // 使用矩形查询
-//                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
-//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
+                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
                 // 给定点查询，对r树进行范围搜索 queryPoint和distance单位一致。
-                Point queryPoint = Geometries.point(lonOfSource, latOfSource);
-                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryPoint, thresholdOfDistance).toList().toBlocking().single();
-                // 使用圆查询
-//                Circle queryCircle = Geometries.circle(lonOfSource, latOfSource, thresholdOfDistance);
-//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryCircle).toList().toBlocking().single();
-//                System.err.println("过滤之前：searchResult.size() = " + searchResult.size());
+//                Point queryPoint = Geometries.point(lonOfSource, latOfSource);
+//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryPoint, thresholdOfDistance).toList().toBlocking().single();
                 // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
                 filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
-//                System.err.println("过滤之后：searchResult.size() = " + searchResult.size());
-//                List<Entry<Integer, Rectangle>> searchResult = rTrees[timeOfSample].search(queryRectangle, thresholdOfDistance).toList().toBlocking().single();
                 searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
                 indexOfArray++;
             }
             // 对possiblyInfectedSetArray数组取交集。
             TreeSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
+            // 当前窗口内的密接对象不能包含前widthOfSlidingWindow个窗口的已经确定的密接对象,因为还没添加到密接对象集合中。
+            for(int i = 0; i < widthOfSlidingWindow; i++) {
+                contactedObjectIdSetInWindow.removeAll(tempInfectedObjectIdInEachWindowArray[i]);
+            }
             // 得到了发生密接事件的objectId集合：contactedObjectIdSet
             int contactTime = windowStart + widthOfSlidingWindow - 1;
             List<ContactEvent> fusionResult = constructContactEvent(sourceId, contactedObjectIdSetInWindow, tempSet, contactTime);
@@ -165,9 +177,48 @@ public class LIPMA {
             //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
             tempSet.addAll(contactedObjectIdSetInWindow);
         }
-        //将该窗口内密接事件的id加入到已确定密接对象id集合中
-        identifiedContactObjectsId.addAll(tempSet);
+        return tempSet;
+    }
 
+    private TreeSet<Integer> commonQuery(int windowStart, Set<Integer> sourceObjectIdSet, List<ContactEvent> results,  TreeSet<Integer> tempInfectedObjectIdSet1) {
+        TreeSet<Integer> tempSet = new TreeSet<>(); // 记录当前窗口已被传染的移动对象id
+        for(Integer sourceId : sourceObjectIdSet) {
+            // 记录当前滑动窗口内每个时间点与传染源距离都小于d的 移动对象Id。
+            List<TreeSet<Integer>> possiblyInfectedSetArray = initializepossiblyInfectedSetArray();
+            int indexOfArray = 0;
+            // 遍历当前窗口内，width个时间点
+            for(int timeOfSample = windowStart; timeOfSample < windowStart + widthOfSlidingWindow; timeOfSample++) {
+                // 传染源在该时间点的经度
+                double lonOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLongitude();
+                // 传染源在该时间点的纬度
+                double latOfSource = allTraOfObjects.get(sourceId - 1).get(timeOfSample).getLatitude();
+                // 使用矩形查询
+                Rectangle queryRectangle = lonAndLatTranformAndFormRectangle(lonOfSource, latOfSource);
+                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryRectangle).toList().toBlocking().single();
+                // 给定点查询，对r树进行范围搜索 queryPoint和distance单位一致。
+//                Point queryPoint = Geometries.point(lonOfSource, latOfSource);
+//                List<Entry<Integer, Point>> searchResult = rTrees[timeOfSample].search(queryPoint, thresholdOfDistance).toList().toBlocking().single();
+                // 对矩形选取的点需要做筛选，因为矩形对角的距离是大于d的。
+                filterErrorPointInSearchResult(searchResult, lonOfSource, latOfSource);
+                searchResltProcessing(searchResult, possiblyInfectedSetArray, indexOfArray);
+                indexOfArray++;
+            }
+            // 对possiblyInfectedSetArray数组取交集。
+            TreeSet<Integer> contactedObjectIdSetInWindow = takeIntersectionOfObjectIdSet(possiblyInfectedSetArray);
+            // 当前窗口内的密接对象不能包含前widthOfSlidingWindow个窗口的已经确定的密接对象,因为还没添加到密接对象集合中。
+            for(int i = 0; i < widthOfSlidingWindow; i++) {
+                contactedObjectIdSetInWindow.removeAll(tempInfectedObjectIdInEachWindowArray[i]);
+            }
+            // 在同一个窗口内初始传染源的移动对象中除去被密接对象传染源的移动对象。
+            contactedObjectIdSetInWindow.removeAll(tempInfectedObjectIdSet1);
+            // 得到了发生密接事件的objectId集合：contactedObjectIdSet
+            int contactTime = windowStart + widthOfSlidingWindow - 1;
+            List<ContactEvent> fusionResult = constructContactEvent(sourceId, contactedObjectIdSetInWindow, tempSet, contactTime);
+            results.addAll(fusionResult);
+            //将这次发生密接事件的id加入到临时已确定密接对象id集合中。
+            tempSet.addAll(contactedObjectIdSetInWindow);
+        }
+        return tempSet;
     }
 
     /**
@@ -237,7 +288,6 @@ public class LIPMA {
             PositionPoint objectPositon = new PositionPoint(0, latOfObject, lonOfObject);
             // 过滤矩形中不合理的点
             if(HaversineDistance.calculateHaversineDistance(sourcePostion, objectPositon) - thresholdOfDistance > 0) {
-//                System.err.println("error entry.value() = " + entry.value());
                 errorPointList.add(entry);
             }
         }
