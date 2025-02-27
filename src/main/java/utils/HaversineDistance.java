@@ -42,4 +42,10 @@ public class HaversineDistance {
 
         return EARTH_DISTANCE * c;
     }
+
+    public static void main(String[] args) {
+        PositionPoint point = new PositionPoint(0, 31.3815, 121.493);
+        PositionPoint point2 = new PositionPoint(0, 31.3818, 121.493);
+        System.out.println("calculateHaversineDistance(point, point2) = " + calculateHaversineDistance(point, point2));
+    }
 }

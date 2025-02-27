@@ -107,6 +107,54 @@ public class Initialization {
         return objectsToBeAnalyzed;
     }
 
+    public static List<MovingObject> InitializeObjectsToBeAnalyzedByIterator(Collection<Integer> idOfSourceList, String datasetName, int numberOfTracks) {
+        // 初始化的传染源集合
+        List<MovingObject> objectsToBeAnalyzed = new ArrayList<>();
+        // 将用户设定的传染源依次加入
+        for(int i = 1; i < numberOfTracks + 1; i++) {
+            if(!idOfSourceList.contains(i)) {
+                // 传染源
+                MovingObject movingObject = new MovingObject();
+                movingObject.setId(i); //传染源编号
+                // 轨迹
+                Trajectory trajectory = new Trajectory();
+                List<PositionPoint> tra = new ArrayList<>(); // 传染源全部轨迹点组成的轨迹数据
+                // 文件路径
+                String filePath = "D:\\dataset\\contact\\" + datasetName + "\\" + i + ".txt";
+                try(BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+                    String line;
+                    while((line = br.readLine()) != null) {
+                        String[] parts = line.split(",");
+                        double lat = Double.parseDouble(parts[1]); // 纬度
+                        double lon = Double.parseDouble(parts[2]); // 经度
+                        int time = Integer.parseInt(parts[3]); // 轨迹点编号，即时间
+                        PositionPoint point = new PositionPoint(time, lat, lon); // 单个轨迹点
+                        tra.add(point);
+                    }
+                }
+                catch(IOException e) {
+                    e.printStackTrace();
+                }
+                trajectory.setTra(tra);
+                movingObject.setTrajectory(trajectory);
+                objectsToBeAnalyzed.add(movingObject);
+            }
+
+        }
+        return objectsToBeAnalyzed;
+    }
+
+    public static Set<Integer> InitializeObjectsIDToBeAnalyzedByIterator(Collection<Integer> idOfSourceList, int numberOfTracks) {
+        // 初始化的传染源集合
+        Set<Integer> objectsToBeAnalyzed = new HashSet<>();
+        // 将用户设定的传染源依次加入
+        for(int i = 1; i < numberOfTracks + 1; i++) {
+            objectsToBeAnalyzed.add(i);
+        }
+        objectsToBeAnalyzed.removeAll(idOfSourceList);
+        return objectsToBeAnalyzed;
+    }
+
     public static List<List<PositionPoint>> InitializeAllTras(String datasetName, int numberOfTracks) {
         List<List<PositionPoint>> result = new ArrayList<>();
         // 将用户设定的传染源依次加入
@@ -163,7 +211,6 @@ public class Initialization {
             }
         }
         return rTree;
-
     }
 
 }
