@@ -48,19 +48,23 @@ public class Test_LM_DCQ {
 //        // 初始传染源集合
 //        Set<MovingObject> initialInfectiousObjects = Initialization.InitializeInfectiousObjects(infectiousSourceID, dataset);
 
+        // 待分析对象列表
+        List<MovingObject> objectsToBeAnalyzed = Initialization.InitializeObjectsToBeAnalyzedByIterator(infectiousSourceID, dataset, numberOfTracksOfObject);
+        // 初始传染源集合
+        Set<MovingObject> initialInfectiousObjects = Initialization.InitializeInfectiousObjects(infectiousSourceID, dataset);
 
 //        for(int i = 2; i <= 6; i = i + 1) {
-            degree = 2;
+//            degree = i;
             System.out.println("正在执行：degree = " + degree);
             // 不同数据集修改存储路径
             String filePath = "D:\\dataset\\contact\\taxi_result\\loose-multi-source-base\\sourceId="
                     + infectiousSourceID.toString() + "_k=" + degree + "_d=" + thresholdOfDistance + "_ratio=" + ratioOfTime +"_w=" + widthOfSlidingWindow + "_n=" + numberOfTracksOfObject + ".txt";
 
-            // 待分析对象列表
-            List<MovingObject> objectsToBeAnalyzed = Initialization.InitializeObjectsToBeAnalyzedByIterator(infectiousSourceID, dataset, numberOfTracksOfObject);
-            // 初始传染源集合
-            Set<MovingObject> initialInfectiousObjects = Initialization.InitializeInfectiousObjects(infectiousSourceID, dataset);
-            LM_DCQ lmDcq = new LM_DCQ(degree, thresholdOfDistance, widthOfSlidingWindow, ratioOfTime,totalTimePoints,
+//            // 待分析对象列表
+//            List<MovingObject> objectsToBeAnalyzed = Initialization.InitializeObjectsToBeAnalyzedByIterator(infectiousSourceID, dataset, numberOfTracksOfObject);
+//            // 初始传染源集合
+//            Set<MovingObject> initialInfectiousObjects = Initialization.InitializeInfectiousObjects(infectiousSourceID, dataset);
+            LM_DCQ lmDcq = new LM_DCQ(degree, thresholdOfDistance, widthOfSlidingWindow, ratioOfTime, totalTimePoints,
                     objectsToBeAnalyzed, initialInfectiousObjects);
             long startTime = System.currentTimeMillis();
             List<LooseContactEvent> results = lmDcq.queryResult();

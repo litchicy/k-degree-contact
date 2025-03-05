@@ -122,7 +122,8 @@ public class LM_RDCQ {
 
         // 依次处理滑动窗口
         for(int windowStart = 0; windowStart <= totalTimePoints - widthOfSlidingWindow; windowStart++) {
-            System.err.println("当前时间窗口：" + windowStart);
+            if(windowStart % 100 == 0)
+                System.err.println("当前时间窗口：" + windowStart);
             // 在第i个窗口，需要把在第i-width窗口发生密接事件的移动对象 加入到对应的k度密接对象集合M中。
             degreeOfContactedMovingObjects.putAll(tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow]);
             allSourceObject.addAll(tempInfectedObjectIdInEachWindowArray[windowStart % widthOfSlidingWindow].keySet());
@@ -143,7 +144,8 @@ public class LM_RDCQ {
                 kdegreeresult.add(entry.getKey());
             }
         }
-        System.err.println("k度密接结果：" + kdegreeresult + "   k度密接数量：" + kdegreeresult.size());
+        System.err.println("k度密接结果：" + kdegreeresult );
+        System.out.println("k度密接数量：" + kdegreeresult.size());
         return looseContactEvents;
     }
 
